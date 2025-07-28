@@ -2,7 +2,7 @@
 
 A real-time wireless communication system engineered with ESP32 microcontrollers, featuring high-fidelity audio processing and peer-to-peer transmission via ESP-NOW protocol.
 
-![Walkie Talkie Demo](images/walkie_talkie_demo.jpg)
+![Walkie Talkie Demo](walkie_talkie.png)
 
 *Custom-built ESP32 walkie talkie with integrated MAX98357A amplifier and speaker assembly*
 
