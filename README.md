@@ -61,7 +61,6 @@ Executed precise soldering and hardware assembly featuring:
 
 - **End-to-End Latency:** <100ms from capture to playback  
 - **Transmission Reliability:** >99% packet delivery under normal conditions  
-- **Battery Life:** 6-8 hours continuous operation  
 - **Audio Fidelity:** Comparable to commercial walkie-talkie systems  
 - **Concurrent Operations:** Full-duplex capability with priority-based state management  
 
