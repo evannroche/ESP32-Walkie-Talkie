@@ -1,0 +1,6 @@
+{
+  "name": "walkie_core",
+  "version": "1.0.0",
+  "description": "Hardware-independent audio codec and ESP-NOW packet framing/reassembly",
+  "build": { "includeDir": "include", "srcDir": "src" }
+}
