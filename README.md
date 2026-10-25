@@ -1,76 +1,87 @@
-# ESP32 Walkie Talkie
+# ESP32 Walkie-Talkie
 
-A real-time wireless communication system engineered with ESP32 microcontrollers, featuring high-fidelity audio processing and peer-to-peer transmission via ESP-NOW protocol.
+[![Firmware and tests](https://github.com/evannroche/ESP32-Walkie-Talkie/actions/workflows/ci.yml/badge.svg)](https://github.com/evannroche/ESP32-Walkie-Talkie/actions/workflows/ci.yml)
 
-![Walkie Talkie Demo](walkie_talkie.png)
+A **push-to-talk, half-duplex** voice radio built using two classic ESP32 boards and ESP-NOW. The ESP32 devices exchange voice recordings directly without a Wi-Fi router. Hold the button to capture up to **3 seconds** of audio; release it to transmit. The other board reassembles the recording and plays it over a MAX98357A I2S amplifier.
 
-*Custom-built ESP32 walkie talkie with integrated MAX98357A amplifier and speaker assembly*
+```
+Microphone -> ADC1 -> 8 kHz / 8-bit recording buffer -> packet framing
+                                                        |
+Speaker <- MAX98357A <- I2S <- playback buffer <- ESP-NOW reassembly
+                                                        ^
+                                                 ESP-NOW wireless link
+```
 
-## Project Overview
+## Hardware and wiring
 
-This project demonstrates advanced embedded systems engineering through the development of a two-way wireless walkie-talkie system. The implementation showcases expertise in real-time audio processing, wireless communication protocols, and custom hardware integration.
+This pinout is sourced from [`src/config.h`](src/config.h), and assumes a **classic ESP32-WROOM-32** (`esp32dev`) with an analog microphone output and a MAX98357A I2S amplifier. Supply correct power and ground to the modules; **do not connect a raw electret capsule directly to GPIO34 without a suitable biased analog frontend**.
 
-**Key Technical Achievements:**
-- Engineered efficient peer-to-peer communication using ESP-NOW protocol with 250-byte packet optimization
-- Developed high-fidelity audio pipeline processing 8,000 samples per second with 12-bit ADC precision
-- Implemented dynamic memory management utilizing PSRAM for optimal buffer allocation
-- Integrated I2S digital audio interface with MAX98357A amplifier for high-quality playback
+| ESP32 GPIO | Function | Connect to |
+| --- | --- | --- |
+| GPIO34 | ADC1_CH6 analog input | Conditioned microphone analog output |
+| GPIO23 | Active-high push-to-talk button | Button to 3.3 V; internal pulldown enabled |
+| GPIO2 | Status LED | Onboard LED, if present |
+| GPIO26 | I2S BCLK | MAX98357A BCLK |
+| GPIO25 | I2S LRCLK / WS | MAX98357A LRC |
+| GPIO22 | I2S DOUT | MAX98357A DIN |
+| GPIO27 | Amplifier enable | MAX98357A SD (HIGH = enabled) |
 
-## Technical Implementation
+The paired MAC addresses currently configured in `config.h` are:
 
-### Audio Processing Pipeline
-The system captures analog audio through an electret microphone, digitizes it using the ESP32's 12-bit ADC at 8kHz sampling rate, and processes it through a sophisticated buffer management system. Audio samples are compressed from 12-bit to 8-bit for efficient transmission, then expanded to 16-bit stereo for high-quality playback through the I2S interface.
+| Unit being flashed | Partner MAC address |
+| --- | --- |
+| Left | `F4:65:0B:4A:73:CC` (right board) |
+| Right | `F4:65:0B:48:B9:18` (left board) |
 
-### Wireless Communication Architecture
-Utilizes ESP-NOW protocol for low-latency, peer-to-peer communication without traditional WiFi infrastructure. Features intelligent packet fragmentation to handle ESP-NOW's 250-byte limitation, with automatic reassembly and error handling on the receiving end.
+Confirm both addresses from the Serial Monitor, as firmware or replacement boards may use different addresses. The firmware filters incoming packets by the configured peer address, but this is **not authentication or encryption**.
 
-### Memory Management
-Employs dynamic memory allocation strategy that automatically detects and utilizes PSRAM when available, falling back to heap allocation for compatibility. Implements circular buffering for continuous operation without memory leaks.
+## Build, upload, test
 
-## Hardware Specifications
+To migrate the existing repository, copy this project's contents into its root and remove the obsolete root-level `walkie_talkie.ino`; PlatformIO uses `src/main.cpp` instead. Keep your existing hardware photos or verified demo assets separately.
 
-- **Microcontroller:** ESP32-WROOM-32 with integrated WiFi/Bluetooth  
-- **Audio Processing:** 12-bit ADC input, I2S digital output  
-- **Amplification:** MAX98357A Class-D amplifier (3W output)  
-- **Communication Range:** Up to 200 meters line-of-sight  
-- **Power Requirements:** 5V USB or battery operation  
-- **Audio Quality:** 8kHz sampling rate, voice-optimized frequency response  
+Install [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html), then:
 
-### Circuit Integration
-Executed precise soldering and hardware assembly featuring:
-- Analog frontend for microphone signal conditioning
-- Digital I2S interface routing for minimal noise interference  
-- Power management circuitry for stable operation
-- Compact breadboard assembly suitable for handheld operation
+```sh
+pio run                           # Builds left and right firmware
+pio run -e esp32-left -t upload   # Upload left board (connect its USB cable)
+pio run -e esp32-right -t upload  # Upload right board (connect its USB cable)
+pio device monitor -b 115200
+pio test -e native                # Laptop-only packet/codec tests
+```
 
-## Software Architecture
+`platformio.ini` pins the ESP32 platform to `espressif32 @ 8.0.0`, which contains Arduino-ESP32 3.x and ESP-IDF 5.x drivers. The `native` environment uses the host compiler without any hardware. CI builds both firmware variants and runs the native tests on pushes and pull requests. The badge reports the GitHub Actions workflow state once this refactor is applied to the repository.
 
-### Core Modules
-- **Audio Capture:** Real-time ADC sampling with precise timing control and buffer overflow protection  
-- **ESP-NOW Communication:** Packet-based transmission with metadata headers and automatic fragmentation  
-- **I2S Audio Output:** 16-bit stereo generation with amplifier control and timing synchronization  
-- **State Management:** Comprehensive state machine handling recording, transmission, reception, and playback modes  
+## Design decisions
 
-### Key Algorithms
-- **Precision Sampling:** Microsecond-accurate timing for consistent 8kHz sample rate
-- **Dynamic Compression:** Intelligent bit-depth conversion maintaining audio fidelity
-- **Packet Assembly:** Efficient chunking and reassembly of audio data streams
-- **Buffer Management:** Real-time memory allocation with PSRAM optimization
+- **ESP-NOW** transports short voice messages directly between peers without an access point. No application-level acknowledgements or retries are implemented; ESP-NOW's send status is **not** a guarantee of receiver playback.
+- **8 kHz / 8-bit mono audio** uses 8 KB per recorded second, with 16-bit stereo samples generated only for I2S playback. This is basic speech quality, not high-fidelity audio or lossless compression.
+- **Packet format** uses a fixed **12-byte header on every packet**: magic (1), version (1), type (1), reserved (1), message ID (2), sequence (2), packet count (2), sample count (2), all multibyte fields little-endian. A Start packet has no audio payload. Audio packets contain up to **238 bytes**, fitting within a conservative 250-byte ESP-NOW payload. The maximum recording is 24,000 samples = 101 audio packets plus one Start packet.
+- **Loss and reordering** are handled by sequence number, duplicate suppression, and a bitmap of received packets. Receiving can start from an audio packet if Start was dropped. After the final packet, the receiver waits up to 150 ms for gaps; otherwise, a 350 ms idle timeout flushes partial messages. Missing chunks play as silence, rather than shifting subsequent audio.
+- **Task ownership** keeps the ESP-NOW callbacks short. The Wi-Fi callback only copies packets into a FreeRTOS queue. A receiver task reassembles into one of two buffers and passes ready-message descriptors to `loop()`. The playback buffer is not reusable until released. New receptions are rejected while capturing, sending, or playing (half-duplex).
+- **Audio drivers** use `adc_oneshot` and `i2s_std`. ADC capture applies an adjustable gain and running DC baseline removal. I2S playback writes stereo frames in blocks, with the driver pacing samples via DMA rather than per-sample software delays.
 
-## Performance Characteristics
+## Known limitations
 
-- **End-to-End Latency:** <100ms from capture to playback  
-- **Transmission Reliability:** >99% packet delivery under normal conditions  
-- **Audio Fidelity:** Comparable to commercial walkie-talkie systems  
-- **Concurrent Operations:** Full-duplex capability with priority-based state management  
+- Fixed **3-second** recording cap and **half-duplex** operation; playback currently finishes before another recording begins.
+- **Not encrypted** (`peer.encrypt = false`), and no secure pairing, receiver-level ACK, retransmissions, or CRC beyond lower-layer checks.
+- Sampling is still **polling-based** using `micros()` and may exhibit jitter under CPU load; hardware-timer or ADC continuous DMA capture is a future improvement.
+- Timeout-based loss concealment simply fills missing 8-bit samples with midpoint silence (`128`). There is no jitter buffer, forward error correction, or packet retransmission.
+- The receive queue is bounded; high packet rates or processing stalls can drop packets. Both devices must use the same Wi-Fi channel, and Wi-Fi coexistence and range have not been benchmarked.
+- This README does **not** claim measured latency, range, delivery percentage, or audio fidelity. Those require repeatable hardware tests.
 
-## Development Highlights
+## Demo
 
-- **Embedded C/C++** programming with Arduino framework
-- **Real-time systems** development with precise timing constraints
-- **Wireless communication** protocol implementation and optimization
-- **Digital signal processing** for audio applications
-- **Hardware integration** including analog and digital interfaces
-- **Memory management** optimization for resource-constrained systems
-- **Circuit assembly** with surface-mount components and precision soldering
+Add a short **real hardware video or GIF** showing a recording on one board and playback on the other. A demo is not included because it has not been provided or verified.
 
+## Project layout
+
+```text
+src/main.cpp               Button debounce and state transitions
+src/config.h               Pinout, sample rate, board pair addresses
+src/audio_capture.*        ADC capture and DC-offset cancellation
+src/audio_playback.*       Block-based I2S output
+src/transport.*            ESP-NOW callbacks, FreeRTOS queues, TX and RX tasks
+lib/walkie_core/           Hardware-independent packet codec and reassembler
+test/test_protocol/        Native Unity tests
+.github/workflows/ci.yml  Firmware build and test workflow
+```
